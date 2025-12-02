@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Origami Tendon-Driven Soft Robot</title>
+  
+  <style>
+    /* 1. 심플한 레트로 스타일 UI */
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: #1e1e1e;
+      font-family: sans-serif;
+    }
+
+    #ui {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      width: 200px; /* 원래의 좁고 깔끔한 폭 */
+      background: rgba(255, 255, 255, 0.9);
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      z-index: 100;
+      user-select: none;
+    }
+
+    h1 {
+      font-size: 1.0rem;
+      margin: 0 0 10px 0;
+      color: #333;
+      border-bottom: 2px solid #333;
+      padding-bottom: 5px;
+    }
+
+    .row { margin-bottom: 10px; }
+    
+    label {
+      display: inline-block;
+      width: 40px;
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+
+    input[type=range] {
+      width: 100px; /* 슬라이더 길이 */
+      vertical-align: middle;
+    }
+
+    /* 키보드 스타일 */
+    kbd {
+      background-color: #eee;
+      border: 1px solid #b4b4b4;
+      border-radius: 3px;
+      font-size: 0.75em;
+      padding: 1px 4px;
+      font-family: monospace;
+    }
+
+    .small {
+      font-size: 0.75rem;
+      color: #666;
+      margin-top: 5px;
+      border-top: 1px dashed #ccc;
+      padding-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  
+  <div id="ui">
+    <h1>Origami Robot</h1>
+
+    <div class="row" style="font-size: 0.8rem;">
+      <label style="width:auto;"><input type="checkbox" id="panToggle"> Pan</label>
+      <div style="margin-top:4px;">
+        <span style="color:#D32F2F;">Key:</span> <kbd>QW</kbd><kbd>AS</kbd>...<br>
+        <span style="color:#2E7D32;"><b>CV:</b></span> Show Hand 🖐️
+      </div>
+    </div>
+
+    <div class="row">
+      <label>Up</label>
+      <input type="range" id="wireUp" min="0" max="1" step="0.01" value="0" />
+    </div>
+    <div class="row">
+      <label>Down</label>
+      <input type="range" id="wireDown" min="0" max="1" step="0.01" value="0" />
+    </div>
+    <div class="row">
+      <label>Left</label>
+      <input type="range" id="wireLeft" min="0" max="1" step="0.01" value="0" />
+    </div>
+    <div class="row">
+      <label>Right</label>
+      <input type="range" id="wireRight" min="0" max="1" step="0.01" value="0" />
+    </div>
+
+    <hr style="border: 0; border-top: 1px dashed #ccc; margin: 10px 0;">
+    <div class="row" style="font-size: 0.8rem; font-weight: bold; color: #555;">
+      Camera Layout
+    </div>
+    <div class="row">
+      <label>Size</label> <input type="range" id="camSize" min="100" max="600" value="240" />
+    </div>
+    <div class="row">
+      <label>Pos X</label> <input type="range" id="camPosX" min="0" max="100" value="95" />
+    </div>
+    <div class="row">
+      <label>Pos Y</label> <input type="range" id="camPosY" min="0" max="100" value="5" />
+    </div>
+    <div class="small">
+      <span id="wireUpVal" style="display:none">0.00</span> 
+      <span id="infoAngles">Ready...</span><br>
+      <span id="infoEE"></span>
+    </div>
+  </div>
+
+  <div id="sketch-holder"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+  <script src="serial.js"></script>
+  <script src="cv_control.js"></script>
+  <script src="origami_mk2.js"></script> 
+</body>
+</html>
