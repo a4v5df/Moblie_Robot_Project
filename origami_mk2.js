@@ -1,53 +1,301 @@
 // ==========================================================================
-// [설정 패널] 시뮬레이션의 모든 파라미터는 여기서 설정합니다.
+// [origami_mk2.js] - 메인 시뮬레이션 및 비례 속도 제어(P-Control) 로직
 // ==========================================================================
 
-// -----------------------------------------------------------
-// 1. [구조 설계] 로봇의 모양과 크기 설정
-// -----------------------------------------------------------
-let SEG_COUNT    = 8;    // [층수] 로봇이 몇 개의 층으로 이루어져 있는지
-let SEG_HEIGHT   = 50;   // [높이] 한 층(Segment)의 높이 (단위: 픽셀)
-let BODY_RADIUS  = 30;   // [지름] 로봇 몸통의 반지름 (단위: 픽셀)
-let PANELS_COUNT = 6;    // [다각형] Kresling 패턴의 각형 수
+// ##########################################################################
+// [★ 튜닝 설정 구역] 유지보수 시 이 부분의 숫자만 변경하세요!
+// ##########################################################################
+
+// 1. [모터 기본 설정]
+// --------------------------------------------------------------------------
+const SERVO_STOP   = 93;  // [중요] 모터가 멈추는 정지값 (본인 모터에 맞춰 90~94 수정)
+
+// 2. [비례 제어 민감도 설정] (손 속도 -> 모터 파워 변환)
+// --------------------------------------------------------------------------
+const SPEED_GAIN      = 800; // [민감도] 클수록 손을 조금만 빨리 움직여도 모터가 쌩~ 돕니다.
+const MIN_POWER       = 10;  // [최소 파워] 모터가 웅~ 소리만 나고 안 도는 것을 방지 (정지값 ±10부터 시작)
+const MAX_POWER_LIMIT = 87;  // [최대 파워] 모터 안전장치 (180도/0도를 넘지 않도록 제한)
+
+// 3. [반응 임계값]
+// --------------------------------------------------------------------------
+const DELTA_THRESHOLD = 0.005; // 손 떨림 무시 범위 (이 값보다 변위가 작으면 무시)
+
+// 4. [통신 주기]
+// --------------------------------------------------------------------------
+const SEND_INTERVAL = 50;      // 50ms (초당 20회 전송) - 너무 빠르면 통신 에러
+
+// ##########################################################################
+
 
 // -----------------------------------------------------------
-// 2. [와이어 배치] 와이어가 설치된 위치 설정
+// [구조 설계 변수]
 // -----------------------------------------------------------
-let WIRE_BASE_SCALE = 3.5; // 바닥 와이어 거리 (반지름 배수)
-let WIRE_HEAD_SCALE = 1.3; // 헤드 와이어 거리 (반지름 배수)
+let SEG_COUNT    = 8;    // 층수
+let SEG_HEIGHT   = 50;   // 층 높이
+let BODY_RADIUS  = 30;   // 반지름
+let PANELS_COUNT = 6;    // 각형
+let WIRE_BASE_SCALE = 3.5;
+let WIRE_HEAD_SCALE = 1.3;
 
 // -----------------------------------------------------------
-// 3. [물리적 특성] 종이의 재질과 움직임 특성
+// [물리적 특성]
 // -----------------------------------------------------------
-let BEND_SENSITIVITY = 0.8; // 굽힘 민감도
-let MAX_TWIST_DEG = 30;     // 압축 시 회전 각도 (도)
-let MAX_BEND_LIMIT_DEG = 10.0; // 층당 최대 꺾임 한계 (도)
+let BEND_SENSITIVITY = 0.8;
+let MAX_TWIST_DEG = 30;
+let MAX_BEND_LIMIT_DEG = 10.0;
+let MIN_HEIGHT_RATIO = 0.15;
+let MIN_RADIUS_RATIO = 1.2;
 
 // -----------------------------------------------------------
-// 4. [압축 한계] 로봇이 접혔을 때의 모양 제한
-// -----------------------------------------------------------
-let MIN_HEIGHT_RATIO = 0.15; // 최소 높이 비율
-let MIN_RADIUS_RATIO = 1.2;  // 압축 시 팽창 비율
-
-// ==========================================================================
 // [시스템 변수]
-// ==========================================================================
-
+// -----------------------------------------------------------
 let robot;
 let ui = {};
 let panX = 0, panY = 0;
 let isPanning = false;
 let simTime = 0;
 
-// [전역 변수] 와이어 장력 (0.0 ~ 1.0)
-// cv_control.js의 HandController가 이 변수들을 직접 수정합니다.
-var wireUp = 0.0, wireDown = 0.0, wireLeft = 0.0, wireRight = 0.0;  
+// [현재 장력 변수]
+var wireUp = 0.0, wireDown = 0.0, wireLeft = 0.0, wireRight = 0.0;
 
-// [추가됨] 핸드 컨트롤러 인스턴스
-let handController; 
+// [이전 프레임 장력 변수] (변위/속도 계산용)
+let prevUp = 0.0, prevDown = 0.0, prevLeft = 0.0, prevRight = 0.0;
+
+let handController;
+let lastSendTime = 0;
 
 // =============================
-// OrigamiRobot 클래스
+// 메인 p5.js 함수들 (Setup & Draw)
+// =============================
+
+function setup() {
+  const holder = document.getElementById('sketch-holder');
+  let w = holder ? holder.clientWidth : windowWidth;
+  let h = holder ? holder.clientHeight : windowHeight;
+  if (h < 100) h = window.innerHeight; 
+
+  let cnv = createCanvas(w, h, WEBGL);
+  if (holder) cnv.parent('sketch-holder');
+  
+  setAttributes('antialias', true);
+  initCamera();
+
+  robot = new OrigamiRobot(SEG_COUNT, SEG_HEIGHT, BODY_RADIUS);
+  setupUI();
+
+  // 핸드 컨트롤러 초기화 (cv_control.js가 로드되어 있어야 함)
+  if (typeof HandController !== 'undefined') {
+    handController = new HandController();
+    handController.init();
+  } else {
+    console.warn("cv_control.js가 로드되지 않았습니다.");
+  }
+}
+
+function initCamera() {
+  camera(0, -350, 500, 0, -50, 0, 0, 1, 0);
+}
+
+function draw() {
+  background(30);
+
+  // 1. 핸드 트래킹 업데이트
+  let handDetected = false;
+  if (handController) {
+    handController.update();    
+    handController.drawDebug(); 
+    
+    if (handController.hands && handController.hands.length > 0) {
+      handDetected = true;
+      syncSliders();
+    }
+  }
+
+  // 2. [핵심] 비례 속도 제어 명령 전송 (ESP32 통신)
+  if (typeof serialCtrl !== 'undefined' && serialCtrl.isConnected) {
+    if (millis() - lastSendTime > SEND_INTERVAL) {
+      sendProportionalCommands();
+      lastSendTime = millis();
+    }
+  }
+
+  // 3. 3D 렌더링 환경 설정
+  ambientLight(100); 
+  directionalLight(255, 255, 255, 0.5, 1, -0.5); 
+  pointLight(200, 200, 200, 0, 0, 300); 
+
+  if (isPanning && mouseIsPressed) {
+      panX += movedX; panY += movedY;
+  } else {
+    orbitControl();
+  }
+  translate(panX, panY, 0);
+  
+  push();
+  scale(1, -1, 1); // p5.js의 Y축 반전 보정
+
+  drawGrid();
+
+  // 손이 없을 때만 키보드 입력 허용
+  if (!handDetected) {
+    handleKeyboardInput();
+  }
+
+  const dt = deltaTime / 1000.0;
+  simTime += dt;
+
+  if (robot) {
+    robot.update(dt, simTime);
+    robot.render();
+  }
+  pop();
+
+  updateInfo();
+}
+
+// =============================
+// [핵심 기능] 비례 제어(P-Control) 계산 및 전송
+// =============================
+function sendProportionalCommands() {
+  
+  // 개별 와이어에 대한 비례 속도 계산 함수
+  const calcProportionalSpeed = (current, previous) => {
+    // 1. 변위(속도) 계산
+    let diff = current - previous;
+    let absDiff = Math.abs(diff);
+
+    // 2. 데드존 체크 (변화가 너무 작으면 정지)
+    if (absDiff < DELTA_THRESHOLD) {
+      return SERVO_STOP;
+    }
+
+    // 3. 속도 -> 모터 파워 변환 (Gain 곱하기)
+    // 예: 변위 0.05 * 800 = 40 (정지값에서 40만큼 더하거나 뺌)
+    let power = absDiff * SPEED_GAIN;
+
+    // 4. 파워 제한 (최소 구동력 보장 및 최대 속도 제한)
+    power = constrain(power, MIN_POWER, MAX_POWER_LIMIT);
+    power = Math.floor(power); // 정수로 변환
+
+    // 5. 방향 결정
+    if (diff > 0) {
+      // 감기 (Winding): 정지값 + 파워 (예: 93 + 40 = 133)
+      return SERVO_STOP + power;
+    } else {
+      // 풀기 (Unwinding): 정지값 - 파워 (예: 93 - 40 = 53)
+      return SERVO_STOP - power;
+    }
+  };
+
+  let cmdUp    = calcProportionalSpeed(wireUp, prevUp);
+  let cmdDown  = calcProportionalSpeed(wireDown, prevDown);
+  let cmdLeft  = calcProportionalSpeed(wireLeft, prevLeft);
+  let cmdRight = calcProportionalSpeed(wireRight, prevRight);
+
+  // 현재 값을 과거 값으로 저장 (다음 프레임 비교용)
+  prevUp = wireUp; 
+  prevDown = wireDown; 
+  prevLeft = wireLeft; 
+  prevRight = wireRight;
+
+  // 시리얼 전송 (포맷: "133,53,93,93")
+  let dataStr = `${cmdUp},${cmdDown},${cmdLeft},${cmdRight}`;
+  serialCtrl.write(dataStr);
+}
+
+// =============================
+// UI 및 이벤트 핸들러
+// =============================
+
+function setupUI() {
+  ui.panToggle = document.getElementById('panToggle');
+  if (ui.panToggle) {
+    ui.panToggle.addEventListener('change', () => { isPanning = ui.panToggle.checked; });
+  }
+
+  // 슬라이더 바인딩
+  const bindWire = (id, valId, setter) => {
+    let s = document.getElementById(id), l = document.getElementById(valId);
+    if (!s) return;
+    s.oninput = () => { const v = parseFloat(s.value); setter(v); if (l) l.textContent = v.toFixed(2); };
+    ui[id] = s; ui[valId] = l;
+  };
+  bindWire('wireUp', 'wireUpVal', v => wireUp = v);
+  bindWire('wireDown', 'wireDownVal', v => wireDown = v);
+  bindWire('wireLeft', 'wireLeftVal', v => wireLeft = v);
+  bindWire('wireRight', 'wireRightVal', v => wireRight = v);
+
+  ui.infoAngles = document.getElementById('infoAngles');
+  ui.infoEE     = document.getElementById('infoEE');
+
+  // 연결 버튼 이벤트
+  const btnConnect = document.getElementById('btnConnect');
+  if (btnConnect) {
+    btnConnect.addEventListener('click', () => {
+      if (typeof serialCtrl !== 'undefined') serialCtrl.connect();
+      else alert("serial.js가 로드되지 않았습니다.");
+    });
+  }
+}
+
+function windowResized() {
+  const holder = document.getElementById('sketch-holder');
+  let w = holder ? holder.clientWidth : windowWidth;
+  let h = holder ? holder.clientHeight : windowHeight;
+  resizeCanvas(w, h);
+  initCamera();
+}
+
+function drawGrid() {
+  push();
+  stroke(60);
+  strokeWeight(1);
+  for (let i = -10; i <= 10; i++) {
+    line(i * 50, 0, -500, i * 50, 0, 500);
+    line(-500, 0, i * 50, 500, 0, i * 50);
+  }
+  pop();
+}
+
+function updateInfo() {
+  if (ui.infoAngles && robot) {
+    ui.infoAngles.innerText = `Comp: ${(robot.compFactor * 100).toFixed(0)}%`;
+  }
+  if (ui.infoEE && robot) {
+    const h = robot.getHeadPosition();
+    ui.infoEE.innerText = `Head Y: ${h.y.toFixed(1)}`;
+  }
+}
+
+function handleKeyboardInput() {
+  const SPEED = 0.015; 
+  let changed = false;
+  if (keyIsDown(81)) { wireUp += SPEED; changed = true; } // Q
+  if (keyIsDown(65)) { wireUp -= SPEED; changed = true; } // A
+  if (keyIsDown(87)) { wireDown += SPEED; changed = true; } // W
+  if (keyIsDown(83)) { wireDown -= SPEED; changed = true; } // S
+  if (keyIsDown(69)) { wireLeft += SPEED; changed = true; } // E
+  if (keyIsDown(68)) { wireLeft -= SPEED; changed = true; } // D
+  if (keyIsDown(82)) { wireRight += SPEED; changed = true; } // R
+  if (keyIsDown(70)) { wireRight -= SPEED; changed = true; } // F
+
+  if (changed) {
+    wireUp=constrain(wireUp,0,1); wireDown=constrain(wireDown,0,1);
+    wireLeft=constrain(wireLeft,0,1); wireRight=constrain(wireRight,0,1);
+    syncSliders();
+  }
+}
+
+function syncSliders() {
+  const sync = (s, l, v) => { if (s) { s.value = v; if(l) l.textContent = v.toFixed(2); } };
+  sync(ui.wireUp, ui.wireUpVal, wireUp);
+  sync(ui.wireDown, ui.wireDownVal, wireDown);
+  sync(ui.wireLeft, ui.wireLeftVal, wireLeft);
+  sync(ui.wireRight, ui.wireRightVal, wireRight);
+}
+
+// =============================
+// OrigamiRobot 클래스 (렌더링 포함)
 // =============================
 
 class OrigamiRobot {
@@ -84,10 +332,9 @@ class OrigamiRobot {
     let lenLeft  = map(wireLeft,  0, 1, hMax, hMin);
     let lenRight = map(wireRight, 0, 1, hMax, hMin);
 
-    // 2. 중심축 높이 (평균)
     let avgH = (lenUp + lenDown + lenLeft + lenRight) / 4;
     
-    // 3. 굽힘 각도 계산
+    // 2. 굽힘 각도 계산
     let bendMultiplier = BEND_SENSITIVITY; 
     let targetAngleX = (lenDown - lenUp)   / (this.radius * 2) * bendMultiplier; 
     let targetAngleZ = (lenRight - lenLeft) / (this.radius * 2) * bendMultiplier;
@@ -291,187 +538,3 @@ class OrigamiRobot {
     return { x: h.x, y: h.y, z: h.z };
   }
 }
-
-// =============================
-// Setup & Draw (p5.js)
-// =============================
-
-function setup() {
-  const holder = document.getElementById('sketch-holder');
-  let w = holder ? holder.clientWidth : windowWidth;
-  let h = holder ? holder.clientHeight : windowHeight;
-  if (h < 100) h = window.innerHeight; 
-
-  let cnv = createCanvas(w, h, WEBGL);
-  if (holder) cnv.parent('sketch-holder');
-  
-  setAttributes('antialias', true);
-  initCamera();
-
-  robot = new OrigamiRobot(SEG_COUNT, SEG_HEIGHT, BODY_RADIUS);
-  setupUI();
-
-  // [수정됨] 카메라 컨트롤러 초기화 (cv_control.js에 정의된 클래스 사용)
-  if (typeof HandController !== 'undefined') {
-    handController = new HandController();
-    handController.init();
-  } else {
-    console.warn("cv_control.js가 로드되지 않았습니다. HandController를 찾을 수 없습니다.");
-  }
-}
-
-function initCamera() {
-  camera(0, -350, 500, 0, -50, 0, 0, 1, 0);
-}
-
-function setupUI() {
-  ui.panToggle = document.getElementById('panToggle');
-  if (ui.panToggle) {
-    ui.panToggle.addEventListener('change', () => { isPanning = ui.panToggle.checked; });
-  }
-
-  ui.wireUp    = document.getElementById('wireUp');
-  ui.wireDown  = document.getElementById('wireDown');
-  ui.wireLeft  = document.getElementById('wireLeft');
-  ui.wireRight = document.getElementById('wireRight');
-  
-  ui.wireUpVal    = document.getElementById('wireUpVal');
-  ui.wireDownVal  = document.getElementById('wireDownVal');
-  ui.wireLeftVal  = document.getElementById('wireLeftVal');
-  ui.wireRightVal = document.getElementById('wireRightVal');
-
-  ui.infoAngles = document.getElementById('infoAngles');
-  ui.infoEE     = document.getElementById('infoEE');
-
-  const bindWire = (slider, labelSpan, setter) => {
-    if (!slider) return;
-    slider.oninput = () => {
-      const v = parseFloat(slider.value);
-      setter(v);
-      if (labelSpan) labelSpan.textContent = v.toFixed(2);
-    };
-  };
-
-  bindWire(ui.wireUp,    ui.wireUpVal,    v => wireUp = v);
-  bindWire(ui.wireDown,  ui.wireDownVal,  v => wireDown = v);
-  bindWire(ui.wireLeft,  ui.wireLeftVal,  v => wireLeft = v);
-  bindWire(ui.wireRight, ui.wireRightVal, v => wireRight = v);
-  
-  // 시리얼 버튼은 이제 필요 없거나, 기존 UI 유지용으로 둠 (작동 안 함)
-  const btnSerial = document.getElementById('btnSerial');
-  if(btnSerial) btnSerial.style.display = 'none'; // 숨김 처리
-}
-
-function windowResized() {
-  const holder = document.getElementById('sketch-holder');
-  let w = holder ? holder.clientWidth : windowWidth;
-  let h = holder ? holder.clientHeight : windowHeight;
-  resizeCanvas(w, h);
-  initCamera();
-}
-
-function draw() {
-  background(30);
-
-  // [수정됨] 핸드 컨트롤러 업데이트 및 디버그 뷰 그리기
-  let handDetected = false;
-  if (handController) {
-    handController.update();    // 손 위치에 따라 wire 변수 업데이트
-    handController.drawDebug(); // 화면 좌상단에 카메라 영상 오버레이
-    
-    // 손이 인식되었는지 확인 (Hands 배열 길이 체크)
-    if (handController.hands && handController.hands.length > 0) {
-      handDetected = true;
-      syncSliders(); // UI 슬라이더 움직임 동기화
-    }
-  }
-
-  ambientLight(100); 
-  directionalLight(255, 255, 255, 0.5, 1, -0.5); 
-  pointLight(200, 200, 200, 0, 0, 300); 
-
-  if (isPanning && mouseIsPressed) {
-      panX += movedX;
-      panY += movedY;
-  } else {
-    orbitControl();
-  }
-  translate(panX, panY, 0);
-
-  push();
-  scale(1, -1, 1);
-
-  drawGrid();
-
-  // [수정됨] 손이 없을 때만 키보드 입력 받기 (우선순위 처리)
-  if (!handDetected) {
-    handleKeyboardInput();
-  }
-
-  const dt = deltaTime / 1000.0;
-  simTime += dt;
-
-  if (robot) {
-    robot.update(dt, simTime);
-    robot.render();
-  }
-
-  pop();
-
-  updateInfo();
-}
-
-function drawGrid() {
-  push();
-  stroke(60);
-  strokeWeight(1);
-  for (let i = -10; i <= 10; i++) {
-    line(i * 50, 0, -500, i * 50, 0, 500);
-    line(-500, 0, i * 50, 500, 0, i * 50);
-  }
-  pop();
-}
-
-function updateInfo() {
-  if (ui.infoAngles && robot) {
-    ui.infoAngles.innerText =
-      `Tensions: U=${wireUp.toFixed(2)} D=${wireDown.toFixed(2)} L=${wireLeft.toFixed(2)} R=${wireRight.toFixed(2)}\n` +
-      `Comp: ${(robot.compFactor * 100).toFixed(0)}% | Twist: ${degrees(robot.twistAngle).toFixed(1)}°`;
-  }
-  if (ui.infoEE && robot) {
-    const h = robot.getHeadPosition();
-    ui.infoEE.innerText = `Head: (${h.x.toFixed(1)}, ${h.y.toFixed(1)}, ${h.z.toFixed(1)})`;
-  }
-}
-
-function handleKeyboardInput() {
-  const SPEED = 0.015; 
-  let changed = false;
-
-  if (keyIsDown(81)) { wireUp += SPEED; changed = true; } // Q
-  if (keyIsDown(65)) { wireUp -= SPEED; changed = true; } // A
-  
-  if (keyIsDown(87)) { wireDown += SPEED; changed = true; } // W
-  if (keyIsDown(83)) { wireDown -= SPEED; changed = true; } // S
-  
-  if (keyIsDown(69)) { wireLeft += SPEED; changed = true; } // E
-  if (keyIsDown(68)) { wireLeft -= SPEED; changed = true; } // D
-  
-  if (keyIsDown(82)) { wireRight += SPEED; changed = true; } // R
-  if (keyIsDown(70)) { wireRight -= SPEED; changed = true; } // F
-
-  if (changed) {
-    wireUp    = constrain(wireUp, 0, 1);
-    wireDown  = constrain(wireDown, 0, 1);
-    wireLeft  = constrain(wireLeft, 0, 1);
-    wireRight = constrain(wireRight, 0, 1);
-    syncSliders();
-  }
-}
-
-function syncSliders() {
-  if (ui.wireUp) { ui.wireUp.value = wireUp; if(ui.wireUpVal) ui.wireUpVal.textContent = wireUp.toFixed(2); }
-  if (ui.wireDown) { ui.wireDown.value = wireDown; if(ui.wireDownVal) ui.wireDownVal.textContent = wireDown.toFixed(2); }
-  if (ui.wireLeft) { ui.wireLeft.value = wireLeft; if(ui.wireLeftVal) ui.wireLeftVal.textContent = wireLeft.toFixed(2); }
-  if (ui.wireRight) { ui.wireRight.value = wireRight; if(ui.wireRightVal) ui.wireRightVal.textContent = wireRight.toFixed(2); }
-} 

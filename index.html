@@ -67,6 +67,20 @@
       padding-top: 5px;
     }
 
+    /* 연결 버튼 스타일 */
+    #btnConnect {
+      width: 100%; 
+      padding: 8px; 
+      cursor: pointer; 
+      background: #1976D2; 
+      color: white; 
+      border: none; 
+      border-radius: 4px; 
+      font-weight: bold;
+      transition: background 0.3s;
+    }
+    #btnConnect:hover { background: #1565C0; }
+
     /* 3. 웹캠 오버레이 컨테이너 스타일 */
     #cam-container {
       position: absolute;
@@ -82,34 +96,20 @@
       box-shadow: 0 4px 15px rgba(0,0,0,0.5);
     }
 
-    /* [핵심 수정] 웹캠 비디오 요소 */
     #cam-container video {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      
-      /* cover 대신 fill을 써서 좌표 밀림 방지 */
+      top: 0; left: 0; width: 100%; height: 100%;
       object-fit: fill; 
-      
       transform: scaleX(-1); /* 거울 모드 */
       display: block;
-      z-index: 1; /* 캔버스 뒤로 */
+      z-index: 1; 
     }
 
-    /* [핵심 수정] 뼈대 그리기용 투명 캔버스 */
     #overlay-canvas {
       position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
+      top: 0; left: 0; width: 100%; height: 100%;
       pointer-events: none;
-      
-      /* transform: scaleX(-1);  <-- 삭제함! (JS에서 flipped: true 사용) */
-      
-      z-index: 2; /* 비디오 앞으로 */
+      z-index: 2; 
     }
   </style>
 </head>
@@ -122,6 +122,10 @@
   <div id="ui">
     <h1>Origami Robot</h1>
 
+    <div class="row" style="margin-bottom: 15px;">
+      <button id="btnConnect">🔌 Connect ESP32</button>
+    </div>
+
     <div class="row" style="font-size: 0.8rem;">
       <label style="width:auto;"><input type="checkbox" id="panToggle"> Pan</label>
       <div style="margin-top:4px;">
@@ -131,20 +135,16 @@
     </div>
 
     <div class="row">
-      <label>Up</label>
-      <input type="range" id="wireUp" min="0" max="1" step="0.01" value="0" />
+      <label>Up</label> <input type="range" id="wireUp" min="0" max="1" step="0.01" value="0" />
     </div>
     <div class="row">
-      <label>Down</label>
-      <input type="range" id="wireDown" min="0" max="1" step="0.01" value="0" />
+      <label>Down</label> <input type="range" id="wireDown" min="0" max="1" step="0.01" value="0" />
     </div>
     <div class="row">
-      <label>Left</label>
-      <input type="range" id="wireLeft" min="0" max="1" step="0.01" value="0" />
+      <label>Left</label> <input type="range" id="wireLeft" min="0" max="1" step="0.01" value="0" />
     </div>
     <div class="row">
-      <label>Right</label>
-      <input type="range" id="wireRight" min="0" max="1" step="0.01" value="0" />
+      <label>Right</label> <input type="range" id="wireRight" min="0" max="1" step="0.01" value="0" />
     </div>
 
     <hr style="border: 0; border-top: 1px dashed #ccc; margin: 10px 0;">
@@ -173,6 +173,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
   <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+  
   <script src="serial.js"></script>
   <script src="cv_control.js"></script>
   <script src="origami_mk2.js"></script> 
