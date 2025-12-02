@@ -474,4 +474,4 @@ function syncSliders() {
   if (ui.wireDown) { ui.wireDown.value = wireDown; if(ui.wireDownVal) ui.wireDownVal.textContent = wireDown.toFixed(2); }
   if (ui.wireLeft) { ui.wireLeft.value = wireLeft; if(ui.wireLeftVal) ui.wireLeftVal.textContent = wireLeft.toFixed(2); }
   if (ui.wireRight) { ui.wireRight.value = wireRight; if(ui.wireRightVal) ui.wireRightVal.textContent = wireRight.toFixed(2); }
-}
+} 

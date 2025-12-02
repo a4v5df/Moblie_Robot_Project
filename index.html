@@ -6,7 +6,7 @@
   <title>Origami Tendon-Driven Soft Robot</title>
   
   <style>
-    /* 1. 심플한 레트로 스타일 UI */
+    /* 1. 기본 스타일 */
     body {
       margin: 0;
       overflow: hidden;
@@ -14,11 +14,12 @@
       font-family: sans-serif;
     }
 
+    /* 2. UI 패널 스타일 */
     #ui {
       position: absolute;
       top: 20px;
       left: 20px;
-      width: 200px; /* 원래의 좁고 깔끔한 폭 */
+      width: 200px;
       background: rgba(255, 255, 255, 0.9);
       padding: 15px;
       border-radius: 8px;
@@ -45,11 +46,10 @@
     }
 
     input[type=range] {
-      width: 100px; /* 슬라이더 길이 */
+      width: 100px;
       vertical-align: middle;
     }
 
-    /* 키보드 스타일 */
     kbd {
       background-color: #eee;
       border: 1px solid #b4b4b4;
@@ -66,10 +66,59 @@
       border-top: 1px dashed #ccc;
       padding-top: 5px;
     }
+
+    /* 3. 웹캠 오버레이 컨테이너 스타일 */
+    #cam-container {
+      position: absolute;
+      top: 10px;    
+      right: 10px;  
+      width: 320px; 
+      height: 240px;
+      z-index: 150; 
+      border: 2px solid rgba(255, 255, 255, 0.5);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    }
+
+    /* [핵심 수정] 웹캠 비디오 요소 */
+    #cam-container video {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      
+      /* cover 대신 fill을 써서 좌표 밀림 방지 */
+      object-fit: fill; 
+      
+      transform: scaleX(-1); /* 거울 모드 */
+      display: block;
+      z-index: 1; /* 캔버스 뒤로 */
+    }
+
+    /* [핵심 수정] 뼈대 그리기용 투명 캔버스 */
+    #overlay-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      
+      /* transform: scaleX(-1);  <-- 삭제함! (JS에서 flipped: true 사용) */
+      
+      z-index: 2; /* 비디오 앞으로 */
+    }
   </style>
 </head>
 <body>
   
+  <div id="cam-container">
+    <canvas id="overlay-canvas" width="320" height="240"></canvas>
+  </div>
+
   <div id="ui">
     <h1>Origami Robot</h1>
 
@@ -99,11 +148,12 @@
     </div>
 
     <hr style="border: 0; border-top: 1px dashed #ccc; margin: 10px 0;">
+    
     <div class="row" style="font-size: 0.8rem; font-weight: bold; color: #555;">
       Camera Layout
     </div>
     <div class="row">
-      <label>Size</label> <input type="range" id="camSize" min="100" max="600" value="240" />
+      <label>Size</label> <input type="range" id="camSize" min="150" max="600" value="240" />
     </div>
     <div class="row">
       <label>Pos X</label> <input type="range" id="camPosX" min="0" max="100" value="95" />
@@ -111,6 +161,7 @@
     <div class="row">
       <label>Pos Y</label> <input type="range" id="camPosY" min="0" max="100" value="5" />
     </div>
+
     <div class="small">
       <span id="wireUpVal" style="display:none">0.00</span> 
       <span id="infoAngles">Ready...</span><br>

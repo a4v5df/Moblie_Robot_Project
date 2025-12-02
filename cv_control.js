@@ -1,5 +1,5 @@
 // ==========================================
-// [cv_control.js] - Fixed ReferenceError
+// [cv_control.js] - Exact Alignment Fixed
 // ==========================================
 
 class HandController {
@@ -8,17 +8,27 @@ class HandController {
     this.handPose = null;
     this.hands = [];
     this.isReady = false;
+
+    // HTML 오버레이 요소 참조
+    this.container = document.getElementById('cam-container');
+    this.canvas = document.getElementById('overlay-canvas');
+    // 2D 캔버스 컨텍스트 가져오기
+    this.ctx = this.canvas ? this.canvas.getContext('2d') : null;
   }
 
   init() {
-    // 1. 웹캠 캡처
+    // 1. 웹캠 캡처 생성
     this.video = createCapture(VIDEO);
     this.video.size(320, 240);
-    this.video.hide(); 
+    
+    // [중요] 생성된 비디오 요소를 HTML 컨테이너 안으로 이동
+    if (this.container) {
+      this.video.parent('cam-container');
+    }
 
     // 2. HandPose 모델 로드
     let options = {
-      flipped: true,
+      flipped: true, // [중요] 좌표계 반전 (CSS 비디오의 scaleX(-1)과 매칭됨)
       maxHands: 1
     };
 
@@ -37,18 +47,19 @@ class HandController {
     let hand = this.hands[0];
     if (!hand.keypoints) return;
 
-    // --- 손가락 굽힘 계산 ---
+    // --- 손가락 굽힘을 이용한 와이어 장력 계산 ---
     let wrist = hand.keypoints[0];
     let middleMCP = hand.keypoints[9];
     let palmSize = dist(wrist.x, wrist.y, middleMCP.x, middleMCP.y);
     
     if (palmSize < 10) return; 
 
+    // 손가락 끝과 손목 사이 거리를 이용해 0.0~1.0 값 매핑
     const calculateTension = (tipIdx) => {
       let tip = hand.keypoints[tipIdx];
       let d = dist(wrist.x, wrist.y, tip.x, tip.y);
       let ratio = d / palmSize; 
-      // 1.8(폇을때) ~ 0.7(쥐었을때) -> 0.0 ~ 1.0 매핑
+      // 펼쳤을 때(1.8) ~ 주먹 쥐었을 때(0.7)
       return map(ratio, 1.8, 0.7, 0.0, 1.0, true);
     };
 
@@ -59,114 +70,80 @@ class HandController {
     window.wireRight = calculateTension(20); // 소지
   }
 
-  // [수정됨] HTML UI 슬라이더 값을 읽어서 웹캠 화면 크기와 위치를 결정합니다.
+  // 화면 오버레이 그리기
   drawDebug() {
-    push();
-    
-    // 1. 3D 공간 설정 초기화
-    resetMatrix(); 
-    noLights(); 
-
-    // ---------------------------------------------------------
-    // [UI 연동] HTML 슬라이더 값을 실시간으로 읽어옵니다.
-    // ---------------------------------------------------------
+    // 1. UI 슬라이더 값 읽기
     let sliderSize = document.getElementById('camSize');
     let sliderX    = document.getElementById('camPosX');
     let sliderY    = document.getElementById('camPosY');
 
-    // 1) 크기 (너비 기준, 4:3 비율 유지)
-    // 슬라이더가 없으면 기본값 240 사용
-    let camW = sliderSize ? parseInt(sliderSize.value) : 240;
-    let camH = camW * 0.75; 
+    // 2. HTML 컨테이너(캠 화면) 위치 및 크기 동적 업데이트
+    if (this.container && sliderSize) {
+      let w = parseInt(sliderSize.value);
+      let h = w * 0.75; // 4:3 비율 유지
 
-    // 2) 위치 (0~100% 비율을 화면 좌표로 변환)
-    // p5.js WebGL 좌표계: 중앙이 (0,0)
-    // X: -width/2 (왼쪽 끝) ~ width/2 - camW (오른쪽 끝)
-    // Y: -height/2 (위쪽 끝) ~ height/2 - camH (아래쪽 끝)
-    
-    let valX = sliderX ? parseInt(sliderX.value) : 95; // 기본값 오른쪽
-    let valY = sliderY ? parseInt(sliderY.value) : 5;  // 기본값 위쪽
+      let valX = sliderX ? parseInt(sliderX.value) : 95;
+      let valY = sliderY ? parseInt(sliderY.value) : 5;
+      
+      let maxLeft = window.innerWidth - w;
+      let maxTop = window.innerHeight - h;
+      
+      let left = map(valX, 0, 100, 0, maxLeft);
+      let top  = map(valY, 0, 100, 0, maxTop);
 
-    let minX = -width / 2;
-    let maxX = (width / 2) - camW;
-    let minY = -height / 2;
-    let maxY = (height / 2) - camH;
-
-    let posX = map(valX, 0, 100, minX, maxX);
-    let posY = map(valY, 0, 100, minY, maxY);
-    // ---------------------------------------------------------
-
-    // [중요] Z축을 100만큼 주어 카메라 앞으로 당김 (맨 앞에 보이게 함)
-    translate(posX, posY, 100);
-
-    // 3. 배경 및 비디오 그리기
-    fill(0, 150); // 배경 투명도 (0~255)
-    noStroke();
-    rect(0, 0, camW, camH); 
-
-    if (this.video) {
-      push();
-      translate(camW, 0);
-      scale(-1, 1); // 거울 모드 (좌우 반전)
-      textureMode(NORMAL); 
-      image(this.video, 0, 0, camW, camH);
-      pop();
+      this.container.style.width = w + 'px';
+      this.container.style.height = h + 'px';
+      this.container.style.left = left + 'px';
+      this.container.style.top = top + 'px';
     }
 
-    // 테두리
-    stroke(255);
-    strokeWeight(2);
-    noFill();
-    rect(0, 0, camW, camH);
+    // 3. 2D 오버레이 캔버스에 뼈대 그리기
+    if (this.ctx && this.isReady) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
-    // 4. [인식 시각화] 뼈대와 관절 그리기
-    if (this.hands.length > 0) {
-      let hand = this.hands[0];
-      
-      // 화면 크기에 맞춰 스케일 조정 (원본 320x240 기준)
-      let scaleX = camW / 320; 
-      let scaleY = camH / 240; 
+      if (this.hands.length > 0) {
+        let hand = this.hands[0];
 
-      // (A) 손가락 뼈대 연결선
-      this.drawFinger(hand, [0, 1, 2, 3, 4], scaleX, scaleY);
-      this.drawFinger(hand, [0, 5, 6, 7, 8], scaleX, scaleY);
-      this.drawFinger(hand, [0, 9, 10, 11, 12], scaleX, scaleY);
-      this.drawFinger(hand, [0, 13, 14, 15, 16], scaleX, scaleY);
-      this.drawFinger(hand, [0, 17, 18, 19, 20], scaleX, scaleY);
+        // 뼈대 선 그리기
+        this.ctx.lineWidth = 2;
+        this.ctx.strokeStyle = '#00FF00'; // 초록색
 
-      // (B) 모든 관절 점 찍기 (빨간점)
-      for(let i=0; i<hand.keypoints.length; i++) {
-        let p = hand.keypoints[i];
-        fill(255, 0, 0);
-        noStroke();
-        // 화면이 작아지면 점 크기도 줄임
-        let dotSize = camW < 150 ? 3 : 6;
-        circle(p.x * scaleX, p.y * scaleY, dotSize);
-      }
-      
-      // (C) 손가락 끝 강조 (초록점)
-      let tips = [8, 12, 16, 20];
-      for (let tipIdx of tips) {
-        let p = hand.keypoints[tipIdx];
-        fill(0, 255, 0);
-        let tipSize = camW < 150 ? 5 : 10;
-        circle(p.x * scaleX, p.y * scaleY, tipSize);
+        this.drawFinger2D(hand, [0, 1, 2, 3, 4]);       // 엄지
+        this.drawFinger2D(hand, [0, 5, 6, 7, 8]);       // 검지
+        this.drawFinger2D(hand, [0, 9, 10, 11, 12]);    // 중지
+        this.drawFinger2D(hand, [0, 13, 14, 15, 16]);   // 약지
+        this.drawFinger2D(hand, [0, 17, 18, 19, 20]);   // 소지
+
+        // 관절 점 찍기 (빨간색)
+        this.ctx.fillStyle = 'red';
+        for(let p of hand.keypoints) {
+           this.ctx.beginPath();
+           this.ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
+           this.ctx.fill();
+        }
+        
+        // 손끝 강조 (초록색)
+        let tips = [8, 12, 16, 20];
+        this.ctx.fillStyle = '#00FF00';
+        for (let idx of tips) {
+            let p = hand.keypoints[idx];
+            this.ctx.beginPath();
+            this.ctx.arc(p.x, p.y, 5, 0, 2 * Math.PI);
+            this.ctx.fill();
+        }
       }
     }
-
-    pop();
   }
 
-  // 뼈대 그리기 도우미 함수
-  drawFinger(hand, indices, sx, sy) {
-    stroke(0, 255, 0); // 초록색 뼈대
-    strokeWeight(2);
-    noFill();
-    beginShape();
-    for (let i of indices) {
-      let p = hand.keypoints[i];
-      vertex(p.x * sx, p.y * sy);
+  drawFinger2D(hand, indices) {
+    this.ctx.beginPath();
+    let start = hand.keypoints[indices[0]];
+    this.ctx.moveTo(start.x, start.y);
+    
+    for (let i = 1; i < indices.length; i++) {
+      let p = hand.keypoints[indices[i]];
+      this.ctx.lineTo(p.x, p.y);
     }
-    endShape();
+    this.ctx.stroke();
   }
 }
