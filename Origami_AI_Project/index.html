@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Origami Robot AI Laboratory</title>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <script src="https://unpkg.com/ml5@latest/dist/ml5.min.js"></script>
+  
+  <style>
+    /* 전체 레이아웃 */
+    body { margin: 0; overflow: hidden; background-color: #1e1e1e; font-family: 'Segoe UI', sans-serif; color: white; }
+    
+    /* 좌측 AI 패널 */
+    #ai-panel {
+      position: absolute; top: 20px; left: 20px; width: 280px;
+      background: rgba(0, 0, 0, 0.85); padding: 15px; border-radius: 8px;
+      border: 1px solid #444; box-shadow: 0 4px 15px rgba(0,0,0,0.5); z-index: 100;
+      max-height: 95vh; overflow-y: auto;
+      backdrop-filter: blur(5px);
+    }
+    
+    h2 { font-size: 1.1rem; margin: 0 0 10px 0; color: #4fc3f7; border-bottom: 1px solid #555; padding-bottom: 5px; text-align: center; }
+    
+    /* 버튼 스타일 */
+    button {
+      width: 100%; padding: 10px; margin-bottom: 6px; cursor: pointer;
+      border: none; border-radius: 4px; font-weight: bold; color: white; transition: 0.2s; font-size: 0.9em;
+    }
+    .btn-step1 { background: #1976D2; } /* 파랑 */
+    .btn-step2 { background: #388E3C; } /* 초록 */
+    .btn-step3 { background: #7B1FA2; } /* 보라 */
+    .btn-step4 { background: #D32F2F; } /* 빨강 */
+    button:disabled { background: #444; color: #888; cursor: not-allowed; opacity: 0.7; }
+    button:hover:not(:disabled) { filter: brightness(1.15); transform: translateY(-1px); }
+
+    /* 슬라이더 컨트롤 영역 */
+    .control-group { margin-top: 15px; padding-top: 10px; border-top: 1px solid #444; transition: opacity 0.3s; }
+    .control-title { font-size: 0.85em; font-weight: bold; color: #ff9800; margin-bottom: 8px; display: flex; justify-content: space-between; }
+    .slider-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; font-size: 0.8em; }
+    input[type=range] { flex-grow: 1; margin: 0 8px; cursor: pointer; accent-color: #ff9800; }
+    .val-display { font-family: monospace; color: #ffeb3b; width: 35px; text-align: right; }
+
+    /* 오차 디스플레이 (새로 추가됨) */
+    .error-box {
+      margin-top: 10px; padding: 8px; background: rgba(50, 0, 0, 0.6);
+      border: 1px solid #ff5252; border-radius: 4px; text-align: center;
+    }
+
+    /* 모터 모니터 영역 */
+    #motor-monitor {
+      margin-top: 15px; padding: 10px; background: #222; border-radius: 6px; border: 1px solid #333;
+    }
+    .motor-header { font-size: 0.8em; font-weight: bold; margin-bottom: 8px; color: #00e676; border-bottom: 1px solid #333; padding-bottom: 4px; }
+    .motor-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+    .motor-label { font-size: 0.7em; color: #aaa; width: 20px; }
+    .motor-val { font-size: 0.7em; color: #fff; width: 30px; text-align: right; font-family: monospace; }
+    .motor-bar-bg { flex-grow: 1; height: 6px; background: #333; border-radius: 3px; margin: 0 5px; overflow: hidden; }
+    .motor-bar-fill { height: 100%; background: #00e676; width: 0%; transition: width 0.1s linear, background 0.1s; }
+
+    /* 로그 및 상태창 */
+    #status-box { font-size: 0.8rem; color: #ddd; margin-top: 10px; white-space: pre-wrap; line-height: 1.3; }
+    #log-area { font-family: monospace; font-size: 0.7rem; color: #0f0; background: #000; padding: 5px; height: 60px; overflow-y: auto; margin-top: 5px; border: 1px solid #333; border-radius: 4px;}
+  </style>
+</head>
+<body>
+
+  <div id="ai-panel">
+    <h2>🧬 AI Robot Controller</h2>
+    
+    <button onclick="aiManager.startDataCollection()" class="btn-step1">1. 데이터 수집 & 스캔</button>
+    <button onclick="aiManager.startTraining()" class="btn-step2" id="btnTrain" disabled>2. 학습 시작 (Train)</button>
+    <button onclick="aiManager.startValidation()" class="btn-step3" id="btnValid" disabled>3. 성능 검증 (CSV)</button>
+    <button onclick="aiManager.togglePrediction()" class="btn-step4" id="btnPredict" disabled>4. AI 슬라이더 제어 (OFF)</button>
+
+    <div class="control-group" id="slider-controls" style="opacity: 0.4; pointer-events: none;">
+      <div class="control-title">Target Position (X,Y,Z)</div>
+      
+      <div class="slider-row">
+        <span>X</span>
+        <input type="range" id="inX" min="-100" max="100" value="0">
+        <span id="valX" class="val-display">0</span>
+      </div>
+      
+      <div class="slider-row">
+        <span>Y</span>
+        <input type="range" id="inY" min="100" max="400" value="300">
+        <span id="valY" class="val-display">300</span>
+      </div>
+      
+      <div class="slider-row">
+        <span>Z</span>
+        <input type="range" id="inZ" min="-100" max="100" value="0">
+        <span id="valZ" class="val-display">0</span>
+      </div>
+    </div>
+
+    <!-- <div class="error-box">
+        <span style="color:#ff8a80; font-size:0.8em; font-weight:bold;">실시간 오차 (Distance)</span>
+        <div id="error-display" style="color:#fff; font-size:1.2em; font-family:monospace; font-weight:bold; margin-top:2px;">0.00</div>
+    </div> -->
+
+    <div id="motor-monitor">
+      <div class="motor-header">⚡ Motor Outputs (AI)</div>
+      <div id="motor-bars"></div>
+    </div>
+
+    <div id="status-box">상태: 준비 완료</div>
+    <div id="log-area"></div>
+  </div>
+
+  <div id="sketch-holder"></div>
+
+  <script src="origami_mk2.js"></script>
+  <script src="ai_manager.js"></script>
+
+</body>
+</html>
